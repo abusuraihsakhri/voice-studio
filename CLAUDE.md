@@ -1,3 +1,4 @@
+> Fork override (2026-11-13): The user's explicit direction for abusuraihsakhri/voice-studio is a native Rust desktop with software rendering, no Electron/Chromium/WebView desktop runtime. BUILD_SPEC.md is the implementation contract. Inherited Electron-only, upstream deployment/release and multi-platform release requirements below describe the imported reference and do not govern this fork's new desktop. Preserve licenses, existing data and scientific/software correctness. Commit and push coherent checkpoints on a development branch; do not silently restore Electron as the target.
 ## Active desktop: Electron only
 
 Electron (`electron/`) is the only desktop and web UI. The Tauri shell and legacy
