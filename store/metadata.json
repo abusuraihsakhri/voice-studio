@@ -3,11 +3,8 @@
   "identity": {
     "productName": "VoiceStudio",
     "applicationId": "com.voicestudio.desktop",
-    "macAppStore": {
-      "applicationId": "sh.voicestudio.pro",
-      "appStoreConnectId": "6829361961"
-    },
-    "publisherLegalName": "Yupcha Softwares Private Limited",
+    "macAppStore": {},
+    "publisherLegalName": "",
     "license": "AGPL-3.0-only",
     "defaultLocale": "en-US"
   },
@@ -25,18 +22,26 @@
     ]
   },
   "urls": {
-    "website": "https://voicestudio.sh",
-    "privacyPolicy": "https://voicestudio.sh/privacy",
-    "support": "https://github.com/debpalash/VoiceStudio/issues",
-    "source": "https://github.com/debpalash/VoiceStudio"
+    "website": "https://github.com/abusuraihsakhri/voice-studio",
+    "privacyPolicy": "",
+    "support": "https://github.com/abusuraihsakhri/voice-studio/issues",
+    "source": "https://github.com/abusuraihsakhri/voice-studio"
   },
   "requirements": {
     "diskGib": 10,
     "firstRunNetworkRequired": true,
     "architectures": {
-      "windows": ["x64", "arm64-experimental"],
-      "linux": ["x64"],
-      "macos": ["arm64", "x64-ui-only"]
+      "windows": [
+        "x64",
+        "arm64-experimental"
+      ],
+      "linux": [
+        "x64"
+      ],
+      "macos": [
+        "arm64",
+        "x64-ui-only"
+      ]
     },
     "minimumOs": {
       "windows": "Windows 10",

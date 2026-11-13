@@ -21,20 +21,7 @@ a network, you must also offer those users the complete corresponding source
 code of your modified version under these same AGPL-3.0 terms. See the full
 text in [`LICENSE`](LICENSE).
 
-Commercial use under the AGPL-3.0 is free. What is paid is a **commercial
-license** for organizations that want to embed VoiceStudio in a closed-source or
-proprietary product or service without the AGPL-3.0 copyleft obligations, and
-the VoiceStudio Pro features. See the plans at <https://voicestudio.sh/pro>; for
-other inquiries contact `hi@voicestudio.sh`.
-
-Contributors license their contributions to Yupcha Softwares Private Limited,
-the company that maintains VoiceStudio, under the
-[Contributor License Agreement](.github/CLA-1.0.md). While a contribution is
-in the public repository, it stays available there under the AGPL-3.0 or
-another OSI-approved licence (CLA section 4).
-
-(This Notice is a plain-language summary; the binding terms are the full GNU
-AGPL-3.0 text in [`LICENSE`](LICENSE).)
+This repository is an independent fork. The original authors, companies and sponsors do not maintain, endorse or provide commercial support for it. Copyright and third-party license notices identify source provenance, not an affiliation. No commercial license or paid-service offer is made here.
 
 ### Scope
 
@@ -101,4 +88,3 @@ reproduced verbatim in [`LICENSE`](LICENSE). The authoritative copy lives at
 > AGPL-3.0 text and nothing else, so GitHub's license detection (and the
 > corporate license scanners that gate adoption) can identify it as
 > `AGPL-3.0-only` rather than falling back to "Other" / `NOASSERTION`.
-
