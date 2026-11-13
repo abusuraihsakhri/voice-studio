@@ -44,6 +44,18 @@ The nine Rust unit tests and strict Clippy passed before the final Ctrl+A compat
 
 ## Immediate next milestone
 
+### Native CPU runtime implementation checkpoint
+
+The first core engine now has a direct native path. A pinned static OmniVoice/GGML CPU runtime was compiled successfully under the Rust Job runner, using one compiler task and a 768 MiB limit. The executable is 1,843,200 bytes; Windows recorded 367,468,544 bytes peak Job commit accounting for compilation. Its observed import table contains only KERNEL32, SHELL32 and ADVAPI32. The runtime preflight verified its SHA-256 and expected CLI options without loading a model. Build configuration, source/submodule checks, license staging and preflight are reproducible through `scripts/build-native-engine.ps1`.
+
+The Q4 model catalog contains exact pinned file sizes and LFS SHA-256 identities from the source repository API. The explicit developer downloader uses 64 KiB streaming, HTTPS-only redirects, bounded response sizes, a rate limit, identified partial-file resume and non-overwriting publication after full hash verification. Four offline tests cover successful publication, existing-file preservation, resume and unsafe/incorrect responses. Weights are excluded from Git and preview ZIPs.
+
+Native workers now use STARTUPINFOEX with an explicit three-handle inheritance list. Its backing buffers remain alive for process creation. A live Unicode stdin/stdout fixture passed; an intentionally oversized output failed the job and was truncated to 16 KiB. Worker CPU hard caps are supported; the standard-I/O fixture exercised the 25% cap. The real synthesis fixture uses 25% CPU, a 1 GiB commit cap, reserve checks and the existing owned-process drain.
+
+The fixed synthesis fixture verifies both model hashes, generates a known public phrase, validates WAV sample/frame statistics, rejects silent/non-finite output, adds explicit synthetic metadata and publishes new files without replacing user data. It keeps the shared heavy-stage lease through finalization. Metadata is not an invisible watermark. General inference and cloning are not certified by this fixture, even when it succeeds.
+
+At this checkpoint 19 Rust unit tests, seven Python tests and strict Clippy pass. The model download remains a live prerequisite; no real synthesis result is claimed yet. No application windows were opened or automated during this checkpoint.
+
 ### Command-line-only checkpoint after the UI pause
 
 The native admitted-worker function now acquires a process-wide lease, samples host memory after acquiring it, checks an explicit memory envelope, applies the worker commit ceiling, and releases the lease only after cleanup confirmation. An unresolved cleanup poisons the gate until process restart. Race tests demonstrate that eight competing requests admit one holder. This protects this launch API; legacy/external backend routes are not yet wired through it and AI generation remains disabled in the native UI.

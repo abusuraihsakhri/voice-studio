@@ -48,6 +48,8 @@ pub fn check(python: &Path) -> Result<serde_json::Value, String> {
                 environment: &overrides,
                 directory: Some(&directory),
                 cleanup_confirmed: None,
+                redirection: None,
+                cpu_rate_percent: None,
             },
         )?;
         if outcome.exit_code != 0 {

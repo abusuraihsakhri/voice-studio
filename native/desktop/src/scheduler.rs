@@ -19,6 +19,10 @@ pub struct StageLease {
     state: Arc<GateState>,
     cleanup_required: bool,
 }
+pub fn global() -> &'static ResourceGate {
+    static GATE: std::sync::OnceLock<ResourceGate> = std::sync::OnceLock::new();
+    GATE.get_or_init(Default::default)
+}
 
 impl ResourceGate {
     pub fn acquire(&self) -> Result<StageLease, String> {

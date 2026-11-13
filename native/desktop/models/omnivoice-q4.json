@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "repository": "Serveurperso/OmniVoice-GGUF",
+  "revision": "361609388ae572a820d085185bbbe2a2aac4b30e",
+  "files": [
+    {
+      "name": "omnivoice-base-Q4_K_M.gguf",
+      "bytes": 407485216,
+      "sha256": "4836ba5affcb83c04d08b3e96b6e48ac839947ee3864188739807b68e0e159c6"
+    },
+    {
+      "name": "omnivoice-tokenizer-Q4_K_M.gguf",
+      "bytes": 252474112,
+      "sha256": "988fc32bc699bce361c44e9af8383be9811960441f293eb5ab4ec6bf6386378d"
+    }
+  ]
+}

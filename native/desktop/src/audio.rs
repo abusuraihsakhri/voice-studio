@@ -5,6 +5,14 @@ use std::{
     path::Path,
 };
 pub const MAX_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WaveInfo {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub frames: u64,
+    pub duration_seconds: f64,
+    pub peak_abs: f64,
+}
 pub fn load_preview(path: &Path) -> Result<Vec<u8>, String> {
     let source = File::open(path).map_err(|_| "Choose a readable WAV file.")?;
     let size = source
@@ -22,7 +30,16 @@ pub fn load_preview(path: &Path) -> Result<Vec<u8>, String> {
     if bytes.len() as u64 != size {
         return Err("Audio file changed while loading; retry with a stable file.".into());
     }
-    let mut file = std::io::Cursor::new(&bytes);
+    inspect_wave(&bytes)?;
+    Ok(bytes)
+}
+
+pub fn inspect_wave(bytes: &[u8]) -> Result<WaveInfo, String> {
+    let size = bytes.len() as u64;
+    if !(44..=MAX_PREVIEW_BYTES).contains(&size) {
+        return Err("Unsupported WAV size.".into());
+    }
+    let mut file = std::io::Cursor::new(bytes);
     let mut header = [0u8; 12];
     file.read_exact(&mut header)
         .map_err(|_| "Truncated WAV header.")?;
@@ -71,13 +88,13 @@ pub fn load_preview(path: &Path) -> Result<Vec<u8>, String> {
             {
                 return Err("Preview requires uncompressed mono/stereo PCM WAV (16/24/32-bit) or 32-bit float WAV.".into());
             }
-            format = Some(align as u64);
+            format = Some((kind, channels, rate, align, bits));
         }
         if &chunk[..4] == b"data" {
             if data.is_some() || length == 0 {
                 return Err("Invalid WAV audio-data chunk.".into());
             }
-            data = Some(length);
+            data = Some((position + 8, length));
         }
         position = end + (length % 2);
     }
@@ -85,9 +102,64 @@ pub fn load_preview(path: &Path) -> Result<Vec<u8>, String> {
         return Err("Unsupported WAV chunk layout.".into());
     }
     match (format, data) {
-        (Some(align), Some(length)) if length % align == 0 => Ok(bytes),
+        (Some((kind, channels, rate, align, bits)), Some((offset, length)))
+            if length % align as u64 == 0 =>
+        {
+            let payload = &bytes[offset as usize..(offset + length) as usize];
+            let mut peak = 0f64;
+            for sample in payload.chunks_exact((bits / 8) as usize) {
+                let value = match (kind, bits) {
+                    (3, 32) => f32::from_le_bytes(sample.try_into().unwrap()) as f64,
+                    (1, 16) => i16::from_le_bytes(sample.try_into().unwrap()) as f64 / 32768.,
+                    (1, 24) => {
+                        i32::from_le_bytes([
+                            sample[0],
+                            sample[1],
+                            sample[2],
+                            if sample[2] & 128 != 0 { 255 } else { 0 },
+                        ]) as f64
+                            / 8388608.
+                    }
+                    (1, 32) => i32::from_le_bytes(sample.try_into().unwrap()) as f64 / 2147483648.,
+                    _ => return Err("Unsupported WAV sample representation.".into()),
+                };
+                if !value.is_finite() {
+                    return Err("WAV contains non-finite audio samples.".into());
+                }
+                peak = peak.max(value.abs());
+            }
+            let frames = length / align as u64;
+            Ok(WaveInfo {
+                sample_rate: rate,
+                channels,
+                frames,
+                duration_seconds: frames as f64 / rate as f64,
+                peak_abs: peak,
+            })
+        }
         _ => Err("WAV audio data is missing or misaligned.".into()),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_wave(samples: &[i16]) -> Vec<u8> {
+    let length = (samples.len() * 2) as u32;
+    let mut bytes = Vec::from(&b"RIFF"[..]);
+    bytes.extend((36 + length).to_le_bytes());
+    bytes.extend(b"WAVEfmt ");
+    bytes.extend(16u32.to_le_bytes());
+    bytes.extend(1u16.to_le_bytes());
+    bytes.extend(1u16.to_le_bytes());
+    bytes.extend(24000u32.to_le_bytes());
+    bytes.extend(48000u32.to_le_bytes());
+    bytes.extend(2u16.to_le_bytes());
+    bytes.extend(16u16.to_le_bytes());
+    bytes.extend(b"data");
+    bytes.extend(length.to_le_bytes());
+    for sample in samples {
+        bytes.extend(sample.to_le_bytes());
+    }
+    bytes
 }
 
 #[cfg(test)]

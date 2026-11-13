@@ -56,6 +56,8 @@ pub struct LaunchContext<'a> {
     pub environment: &'a [(std::ffi::OsString, std::ffi::OsString)],
     pub directory: Option<&'a Path>,
     pub cleanup_confirmed: Option<&'a AtomicBool>,
+    pub redirection: Option<crate::worker_io::Redirection<'a>>,
+    pub cpu_rate_percent: Option<u32>,
 }
 
 pub fn run_admitted(
@@ -66,8 +68,7 @@ pub fn run_admitted(
     timeout: Duration,
     cancel: Arc<AtomicBool>,
 ) -> Result<WorkerOutcome, String> {
-    static GATE: std::sync::OnceLock<crate::scheduler::ResourceGate> = std::sync::OnceLock::new();
-    let mut lease = GATE.get_or_init(Default::default).acquire()?;
+    let mut lease = crate::scheduler::global().acquire()?;
     let memory = resource::snapshot()?;
     let policy = ResourcePolicy::conservative(&memory);
     policy.admit(&memory, peak_ram, peak_commit)?;
@@ -173,19 +174,56 @@ pub fn run_owned_configured(
                 std::io::Error::last_os_error()
             ));
         }
-        let mut startup: STARTUPINFOW = std::mem::zeroed();
-        startup.cb = std::mem::size_of_val(&startup) as u32;
+        if let Some(percent) = context.cpu_rate_percent {
+            if !(1..=100).contains(&percent) {
+                return Err("Worker CPU rate must be between 1 and 100 percent.".into());
+            }
+            let cpu = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
+                ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE
+                    | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
+                Anonymous: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0 {
+                    CpuRate: percent * 100,
+                },
+            };
+            if SetInformationJobObject(
+                job.0,
+                JobObjectCpuRateControlInformation,
+                &cpu as *const _ as _,
+                std::mem::size_of_val(&cpu) as u32,
+            ) == 0
+            {
+                return Err(
+                    "Cannot enforce the selected worker CPU limit; worker was not started.".into(),
+                );
+            }
+        }
+        let mut startup: STARTUPINFOEXW = std::mem::zeroed();
+        startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let io = context
+            .redirection
+            .map(crate::worker_io::StandardHandles::create)
+            .transpose()?;
+        if let Some(io) = &io {
+            io.configure(&mut startup);
+        }
         let mut process: PROCESS_INFORMATION = std::mem::zeroed();
         if CreateProcessW(
             application.as_ptr(),
             command.as_mut_ptr(),
             null(),
             null(),
-            0,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            i32::from(io.is_some()),
+            CREATE_SUSPENDED
+                | CREATE_NO_WINDOW
+                | CREATE_UNICODE_ENVIRONMENT
+                | if io.is_some() {
+                    EXTENDED_STARTUPINFO_PRESENT
+                } else {
+                    0
+                },
             environment.as_ptr() as _,
             directory.as_ptr(),
-            &startup,
+            &startup.StartupInfo,
             &mut process,
         ) == 0
         {
@@ -221,6 +259,16 @@ pub fn run_owned_configured(
             }
             if wait == WAIT_FAILED {
                 reason = Some("Worker wait failed.".to_string());
+                break;
+            }
+            if let Some(redirection) = context.redirection
+                && let Some(path) = redirection.log
+                && std::fs::metadata(path)
+                    .map(|m| m.len() > redirection.max_log_bytes)
+                    .unwrap_or(true)
+            {
+                reason =
+                    Some("Worker log exceeded its bounded budget or became unavailable.".into());
                 break;
             }
             if cancel.load(Ordering::Acquire) {
@@ -287,6 +335,30 @@ pub fn run_owned_configured(
         if let Some(cleanup) = context.cleanup_confirmed {
             cleanup.store(true, Ordering::Release);
         }
+        if let Some(redirection) = context.redirection
+            && let Some(path) = redirection.log
+        {
+            match std::fs::metadata(path) {
+                Ok(metadata) if metadata.len() > redirection.max_log_bytes => {
+                    let truncated = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(path)
+                        .and_then(|file| file.set_len(redirection.max_log_bytes));
+                    reason = Some(
+                        if truncated.is_ok() {
+                            "Worker log exceeded its budget; excess output was discarded."
+                        } else {
+                            "Worker log exceeded its budget and could not be truncated."
+                        }
+                        .into(),
+                    );
+                }
+                Err(_) => {
+                    reason = Some("Worker log became unavailable.".into());
+                }
+                _ => {}
+            }
+        }
         if let Some(reason) = reason {
             return Err(reason);
         }
@@ -310,6 +382,87 @@ pub fn run_owned_configured(
             peak_commit: accounting.PeakJobMemoryUsed as u64,
         })
     }
+}
+
+pub fn stdio_test() -> Result<(), String> {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "Clock unavailable.")?
+        .as_nanos();
+    let directory =
+        std::env::temp_dir().join(format!("voice-studio-stdio-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&directory).map_err(|_| "Cannot create I/O test directory.")?;
+    let input = directory.join("input.txt");
+    let log = directory.join("output.log");
+    let result = (|| {
+        let text = "Bounded native I/O — മലയാളം\n";
+        std::fs::write(&input, text).map_err(|_| "Cannot write I/O fixture.")?;
+        let outcome = run_owned_configured(
+            &std::env::current_exe().map_err(|e| e.to_string())?,
+            &["--stdio-probe".into()],
+            128 * 1024 * 1024,
+            Duration::from_secs(15),
+            Arc::new(AtomicBool::new(false)),
+            None,
+            LaunchContext {
+                cpu_rate_percent: Some(25),
+                redirection: Some(crate::worker_io::Redirection {
+                    input: Some(&input),
+                    log: Some(&log),
+                    max_log_bytes: 16384,
+                }),
+                ..Default::default()
+            },
+        )?;
+        if outcome.exit_code != 0 {
+            return Err(format!("I/O fixture exited {}.", outcome.exit_code));
+        }
+        let value: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&log).map_err(|_| "Cannot read I/O fixture result.")?,
+        )
+        .map_err(|_| "I/O fixture returned invalid JSON.")?;
+        if value["text"] != text {
+            return Err("Worker input encoding changed.".into());
+        }
+        println!(
+            "PASS: Unicode stdin and bounded stdout passed through an explicit inherited-handle whitelist; worker subtree drained."
+        );
+        let spam_log = directory.join("spam.log");
+        let spam = run_owned_configured(
+            &std::env::current_exe().map_err(|e| e.to_string())?,
+            &["--log-spam-probe".into()],
+            128 * 1024 * 1024,
+            Duration::from_secs(15),
+            Arc::new(AtomicBool::new(false)),
+            None,
+            LaunchContext {
+                redirection: Some(crate::worker_io::Redirection {
+                    input: None,
+                    log: Some(&spam_log),
+                    max_log_bytes: 16384,
+                }),
+                ..Default::default()
+            },
+        );
+        if !matches!(&spam,Err(error) if error.contains("log exceeded"))
+            || std::fs::metadata(&spam_log)
+                .map(|m| m.len() > 16384)
+                .unwrap_or(true)
+        {
+            return Err(
+                "Oversized worker output did not fail within its bounded log contract.".into(),
+            );
+        }
+        let _ = std::fs::remove_file(spam_log);
+        println!(
+            "PASS: an oversized worker log failed the job and was truncated to its 16 KiB diagnostic budget."
+        );
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(log);
+    let _ = std::fs::remove_dir(directory);
+    result
 }
 
 fn environment_block(

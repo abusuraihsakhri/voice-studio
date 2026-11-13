@@ -39,18 +39,20 @@ The imported source identifies as 0.5.8. No diagnosis of the current system cras
 
 ```text
 Native Rust desktop UI (software renderer)
-  -> Rust application state and backend supervisor
-  -> authenticated loopback API to existing Python control backend
-  -> shared resource admission and stage lease
-  -> owned, memory-limited engine/media workers
-  -> existing installed weights and output files
+  -> Rust application state, resource admission and stage lease
+  -> native CPU inference worker for the first OmniVoice workflow
+  -> optional isolated Python adapters for engines that require them
+  -> verified model files and staged/marked output files
+
+Existing authenticated local API: optional compatibility/discovery surface;
+the first native CPU workflow does not require the full Python server.
 ```
 
 Do not expose engine execution directly from widget callbacks. UI work stays responsive while jobs execute. Worker death must leave the UI and project state usable. One ownership hierarchy controls shutdown; avoid competing supervisors or PID-name-based termination.
 
 Renderer decision: native Windows controls plus GDI through pinned windows-sys 0.61.2, following the rendered feasibility spike, native accessibility roles, file-dialog checks and bounded PCM playback. No embedded browser or application GPU renderer is introduced. Windows desktop composition and system dialogs remain OS responsibilities. Portable packaging and continued DPI/accessibility checks are required; no cross-platform UI parity is claimed.
 
-Use existing authenticated backend APIs wherever possible. New Rust client must implement bootstrap/authentication, backend instance ownership, readiness, endpoint/version compatibility, bounded events, reconnect and cancellation. No unauthenticated port exposed outside loopback.
+Use existing engine implementations and data contracts wherever possible. Inspection found that the inherited server starts model warm-ups, its TTS registry imports Torch, and its locked CPU installation includes 211 packages. The first native CPU workflow therefore invokes the pinned native OmniVoice runtime directly, avoiding server startup and Torch for that workflow. Other engines may retain isolated Python adapters; optional backend compatibility still requires authentication, ownership, bounded transport and cancellation. No new unauthenticated network service is introduced by native inference. This is an evidence-based architecture refinement, not a commitment to discard supported engines or project data.
 
 ## Native feature inventory and migration order
 
