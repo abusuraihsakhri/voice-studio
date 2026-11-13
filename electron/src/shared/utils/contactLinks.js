@@ -1,4 +1,4 @@
-export const REPO_URL = 'https://github.com/debpalash/VoiceStudio';
+export const REPO_URL = 'https://github.com/abusuraihsakhri/voice-studio';
 export const ISSUES_URL = `${REPO_URL}/issues`;
 export const DISCORD_URL = 'https://discord.gg/bzQavDfVV9';
 // GitHub Security Advisories = the private "report a vulnerability" flow that
