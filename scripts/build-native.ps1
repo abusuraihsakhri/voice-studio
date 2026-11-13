@@ -13,6 +13,8 @@ function Invoke-CheckedCargo([string[]] $CargoArguments) {
 Invoke-CheckedCargo @('fmt', '--manifest-path', $manifestPath, '--', '--check')
 Invoke-CheckedCargo @('test', '--locked', '--manifest-path', $manifestPath)
 Invoke-CheckedCargo @('clippy', '--locked', '--manifest-path', $manifestPath, '--all-targets', '--', '-D', 'warnings')
+& python (Join-Path $repositoryRoot 'tests\native\test_runtime_probe.py')
+if ($LASTEXITCODE -ne 0) { throw 'Native runtime preflight tests failed.' }
 Invoke-CheckedCargo @('build', '--release', '--locked', '--manifest-path', $manifestPath)
 $buildStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $packageName = "voice-studio-native-preview-$buildStamp-windows-x64"

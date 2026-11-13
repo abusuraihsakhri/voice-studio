@@ -4,6 +4,9 @@ mod audio;
 #[cfg(windows)]
 mod backend;
 mod resource;
+#[cfg(windows)]
+mod runtime;
+mod scheduler;
 mod state;
 #[cfg(windows)]
 mod ui;
@@ -12,6 +15,55 @@ mod worker;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(windows)]
+    if args.get(1).is_some_and(|arg| arg == "--runtime-check") {
+        let result = args
+            .get(2)
+            .ok_or_else(|| "Usage: --runtime-check ABSOLUTE_PYTHON_EXE".to_string())
+            .and_then(|path| runtime::check(std::path::Path::new(path)));
+        match result {
+            Ok(report) => {
+                println!("{}", serde_json::to_string_pretty(&report).unwrap());
+                if report["ready"] != true {
+                    std::process::exit(2);
+                }
+            }
+            Err(error) => {
+                eprintln!("Runtime check failed: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    #[cfg(windows)]
+    if args.get(1).is_some_and(|arg| arg == "--admitted-probe") {
+        let result = std::env::current_exe()
+            .map_err(|e| e.to_string())
+            .and_then(|exe| {
+                worker::run_admitted(
+                    &exe,
+                    &["--allocation-probe".into()],
+                    128 * 1024 * 1024,
+                    128 * 1024 * 1024,
+                    std::time::Duration::from_secs(10),
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                )
+            });
+        match result {
+            Ok(outcome) if outcome.exit_code == 0 => println!(
+                "PASS: admitted one bounded worker after fresh host checks; oversized commit was refused and cleanup confirmed."
+            ),
+            Ok(outcome) => {
+                eprintln!("Admitted probe exited {}", outcome.exit_code);
+                std::process::exit(1);
+            }
+            Err(error) => {
+                eprintln!("Admitted probe refused or stopped: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if args.get(1).is_some_and(|arg| arg == "--check-budget") {
         let result = (|| {
             let ram = args

@@ -44,4 +44,14 @@ The nine Rust unit tests and strict Clippy passed before the final Ctrl+A compat
 
 ## Immediate next milestone
 
+### Command-line-only checkpoint after the UI pause
+
+The native admitted-worker function now acquires a process-wide lease, samples host memory after acquiring it, checks an explicit memory envelope, applies the worker commit ceiling, and releases the lease only after cleanup confirmation. An unresolved cleanup poisons the gate until process restart. Race tests demonstrate that eight competing requests admit one holder. This protects this launch API; legacy/external backend routes are not yet wired through it and AI generation remains disabled in the native UI.
+
+Worker launches support validated Unicode environment overrides and an explicit absolute working directory. The embedded runtime preflight runs the selected Python with `-I`, CPU/offline environment settings, a 128 MiB private-commit cap and a 15-second execution budget. Reports are bounded to 32 KiB, do not contain executable paths or credentials, are parsed against the discovery contract, and are removed from a freshly created temporary directory. No model package is imported by the probe.
+
+CLI observations: Python 3.10.11 correctly returned unsupported; an already installed Python 3.12.12 passed the version check but had no backend dependencies. Both reported no imported GPU modules. Admission of the 128 MiB synthetic probe was refused on current host RAM pressure. A locked CPU dependency dry run found the inherited backend would install 211 packages, including many optional engine stacks; it changed no lockfile/environment and performed no installation. Audit lazy imports/dependency profiles before choosing a smaller control-plane environment; do not invent a minimal dependency set or silently disable supported engines.
+
+Twelve Rust unit tests, three standalone Python tests and strict Clippy passed. The interpreter-picker action is implemented and compiles; it was deliberately not opened or automated. A functioning model worker, real synthesis and low-end hardware certification remain outstanding.
+
 Provide managed backend/runtime selection and authenticated owned launch while preserving the existing environment and data. Move generation behind the native resource lease and contained workers, then deliver a real voice-cloning/TTS output. Do not report this preview as the completed goal.

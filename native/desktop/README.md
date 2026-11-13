@@ -11,6 +11,8 @@ Implemented:
 - Conservative budget checks and a Windows Job worker runner: suspended launch, assignment before resume, private-commit cap, cancellation, timeout, kill-on-close and confirmed subtree drain.
 - Bounded, proxy-free authenticated loopback discovery of existing `/health`, `/engines`, `/profiles`; redirects are refused. Discovery does not load a model and does not contain an externally started backend.
 - Separate, atomic, bounded local draft storage; incompatible drafts are preserved rather than overwritten. One window per native data directory.
+- A process-wide heavy-stage lease prevents overlapping admitted workers. Unconfirmed cleanup blocks replacement work until restart. Rejected admission releases its lease without launching a process.
+- "Check Python" selects an existing interpreter for a bounded, CPU-only module-discovery probe. It does not import Torch, install packages or certify backend/model execution. The new action has command-line/unit coverage; its UI has not been exercised in this checkpoint at the user's request.
 - Native file selection and PCM WAV preview, capped at 32 MiB with an owned playback buffer. Stop releases that buffer. Larger/compressed media require the future streaming player.
 
 Not implemented: managed Python setup/launch, AI generation, voice library editing, original project import, batch/narration, ASR, dubbing, model installation, engine certification and installer/update integration. The imported Windows GGUF executable is a zero-byte placeholder; it cannot serve as the inference runtime.
@@ -34,6 +36,8 @@ Diagnostics (pipe GUI-subsystem output to make PowerShell wait):
 & .\native\desktop\target\release\voice-studio-native.exe --diagnostics | Out-String
 & .\native\desktop\target\release\voice-studio-native.exe --containment-test | Out-String
 & .\native\desktop\target\release\voice-studio-native.exe --check-budget 1024 1024 | Out-String
+& .\native\desktop\target\release\voice-studio-native.exe --runtime-check 'C:\path\to\python.exe' | Out-String
+& .\native\desktop\target\release\voice-studio-native.exe --admitted-probe | Out-String
 ```
 
 The allocation probe asks Windows to commit 16 MiB then 512 MiB inside a 128 MiB Job. The second request must fail; it is not a system-exhaustion stress test. Windows' returned peak Job accounting is recorded as-is and may include a rejected allocation attempt; do not interpret it as physical RAM consumption. No GPU/model is loaded by this probe.

@@ -51,6 +51,46 @@ pub struct WorkerOutcome {
     pub peak_commit: u64,
 }
 
+#[derive(Default)]
+pub struct LaunchContext<'a> {
+    pub environment: &'a [(std::ffi::OsString, std::ffi::OsString)],
+    pub directory: Option<&'a Path>,
+    pub cleanup_confirmed: Option<&'a AtomicBool>,
+}
+
+pub fn run_admitted(
+    executable: &Path,
+    args: &[std::ffi::OsString],
+    peak_ram: u64,
+    peak_commit: u64,
+    timeout: Duration,
+    cancel: Arc<AtomicBool>,
+) -> Result<WorkerOutcome, String> {
+    static GATE: std::sync::OnceLock<crate::scheduler::ResourceGate> = std::sync::OnceLock::new();
+    let mut lease = GATE.get_or_init(Default::default).acquire()?;
+    let memory = resource::snapshot()?;
+    let policy = ResourcePolicy::conservative(&memory);
+    policy.admit(&memory, peak_ram, peak_commit)?;
+    let cleanup = AtomicBool::new(true);
+    lease.require_cleanup();
+    let result = run_owned_configured(
+        executable,
+        args,
+        peak_commit,
+        timeout,
+        cancel,
+        Some(&policy),
+        LaunchContext {
+            cleanup_confirmed: Some(&cleanup),
+            ..Default::default()
+        },
+    );
+    if cleanup.load(Ordering::Acquire) {
+        lease.confirm_cleanup();
+    }
+    result
+}
+
 pub fn run_owned(
     executable: &Path,
     args: &[std::ffi::OsString],
@@ -58,6 +98,26 @@ pub fn run_owned(
     timeout: Duration,
     cancel: Arc<AtomicBool>,
     policy: Option<&ResourcePolicy>,
+) -> Result<WorkerOutcome, String> {
+    run_owned_configured(
+        executable,
+        args,
+        limit,
+        timeout,
+        cancel,
+        policy,
+        LaunchContext::default(),
+    )
+}
+
+pub fn run_owned_configured(
+    executable: &Path,
+    args: &[std::ffi::OsString],
+    limit: u64,
+    timeout: Duration,
+    cancel: Arc<AtomicBool>,
+    policy: Option<&ResourcePolicy>,
+    context: LaunchContext<'_>,
 ) -> Result<WorkerOutcome, String> {
     if limit < 64 * 1024 * 1024
         || executable.as_os_str().encode_wide().any(|ch| ch == 0)
@@ -79,13 +139,18 @@ pub fn run_owned(
         command.extend(quote(arg));
     }
     command.push(0);
-    let directory: Vec<u16> = executable
-        .parent()
-        .unwrap()
+    let directory_path = context
+        .directory
+        .unwrap_or_else(|| executable.parent().unwrap());
+    if !directory_path.is_absolute() || !directory_path.is_dir() {
+        return Err("Worker directory must be an existing absolute directory.".into());
+    }
+    let directory: Vec<u16> = directory_path
         .as_os_str()
         .encode_wide()
         .chain(Some(0))
         .collect();
+    let environment = environment_block(context.environment)?;
     unsafe {
         let job = Handle(CreateJobObjectW(null(), null()));
         if job.0.is_null() {
@@ -117,8 +182,8 @@ pub fn run_owned(
             null(),
             null(),
             0,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW,
-            null(),
+            CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            environment.as_ptr() as _,
             directory.as_ptr(),
             &startup,
             &mut process,
@@ -131,13 +196,18 @@ pub fn run_owned(
         }
         let child = Handle(process.hProcess);
         let thread = Handle(process.hThread);
+        if let Some(cleanup) = context.cleanup_confirmed {
+            cleanup.store(false, Ordering::Release);
+        }
         if AssignProcessToJobObject(job.0, child.0) == 0 {
+            let error = std::io::Error::last_os_error();
             TerminateProcess(child.0, 1);
-            WaitForSingleObject(child.0, 5000);
-            return Err(format!(
-                "Worker containment failed: {}",
-                std::io::Error::last_os_error()
-            ));
+            if WaitForSingleObject(child.0, 5000) == WAIT_OBJECT_0
+                && let Some(cleanup) = context.cleanup_confirmed
+            {
+                cleanup.store(true, Ordering::Release);
+            }
+            return Err(format!("Worker containment failed: {}", error));
         }
         if ResumeThread(thread.0) == u32::MAX {
             return Err("Could not resume contained worker.".into());
@@ -214,6 +284,9 @@ pub fn run_owned(
             }
             std::thread::sleep(Duration::from_millis(25));
         }
+        if let Some(cleanup) = context.cleanup_confirmed {
+            cleanup.store(true, Ordering::Release);
+        }
         if let Some(reason) = reason {
             return Err(reason);
         }
@@ -237,6 +310,39 @@ pub fn run_owned(
             peak_commit: accounting.PeakJobMemoryUsed as u64,
         })
     }
+}
+
+fn environment_block(
+    overrides: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Result<Vec<u16>, String> {
+    let mut values = std::collections::BTreeMap::new();
+    for (name, value) in std::env::vars_os() {
+        values.insert(name.to_string_lossy().to_uppercase(), (name, value));
+    }
+    for (name, value) in overrides {
+        if name.is_empty()
+            || name.encode_wide().any(|ch| ch == 0 || ch == b'=' as u16)
+            || value.encode_wide().any(|ch| ch == 0)
+        {
+            return Err("Invalid worker environment override.".into());
+        }
+        values.insert(
+            name.to_string_lossy().to_uppercase(),
+            (name.clone(), value.clone()),
+        );
+    }
+    let mut block = Vec::new();
+    for (_, (name, value)) in values {
+        block.extend(name.encode_wide());
+        block.push(b'=' as u16);
+        block.extend(value.encode_wide());
+        block.push(0);
+    }
+    if block.is_empty() {
+        block.push(0);
+    }
+    block.push(0);
+    Ok(block)
 }
 
 pub fn allocation_probe() {
@@ -315,6 +421,25 @@ pub fn containment_test() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn environment_overrides_are_case_insensitive_and_unicode_safe() {
+        let block = environment_block(&[
+            ("Path".into(), "C:\\native-only".into()),
+            ("VOICE_STUDIO_TEST".into(), "മലയാളം".into()),
+        ])
+        .unwrap();
+        assert!(block.ends_with(&[0, 0]));
+        let text = String::from_utf16(&block).unwrap();
+        let path_entries: Vec<_> = text
+            .split('\0')
+            .filter(|part| part.to_uppercase().starts_with("PATH="))
+            .collect();
+        assert_eq!(path_entries.len(), 1);
+        assert_eq!(path_entries[0], "Path=C:\\native-only");
+        assert!(text.contains("VOICE_STUDIO_TEST=മലയാളം"));
+        assert!(environment_block(&[("INVALID=KEY".into(), "value".into())]).is_err());
+        assert!(environment_block(&[("KEY".into(), "embedded\0nul".into())]).is_err());
+    }
     #[test]
     fn arguments_preserve_quotes_and_trailing_slashes() {
         let value = String::from_utf16(&quote(OsStr::new("C:\\some path\\"))).unwrap();

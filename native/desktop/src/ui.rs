@@ -121,9 +121,10 @@ unsafe fn layout(hwnd: HWND) {
             (1, 24, 18, width - 48, 30),
             (2, 24, 55, width - 48, 25),
             (3, 24, 94, width - 48, 122),
-            (11, 24, 230, 155, 28),
-            (12, 180, 228, 85, 28),
-            (13, 280, 226, 210, 32),
+            (11, 24, 230, 130, 28),
+            (12, 160, 228, 70, 28),
+            (13, 246, 226, 170, 32),
+            (18, 432, 226, 184, 32),
             (14, 24, 266, width - 48, 48),
             (4, 24, 330, width - 48, 24),
             (5, 24, 360, width - 48, (height - 553).max(40)),
@@ -182,7 +183,7 @@ unsafe fn update_font(hwnd: HWND) {
         if font.is_null() {
             return;
         }
-        for id in 1..=17 {
+        for id in 1..=18 {
             SendMessageW(GetDlgItem(hwnd, id), WM_SETFONT, font as usize, 1);
         }
         VIEW.with(|view| {
@@ -266,6 +267,71 @@ unsafe fn choose_audio(hwnd: HWND) {
     }
 }
 
+unsafe fn check_python(hwnd: HWND) {
+    unsafe {
+        if VIEW.with(|v| {
+            v.borrow()
+                .as_ref()
+                .is_some_and(|view| view.pending.is_some())
+        }) {
+            return;
+        }
+        let mut buffer = vec![0u16; 32768];
+        let filter =
+            wide("Python interpreter (python.exe)\0python.exe\0Executable files (*.exe)\0*.exe\0");
+        let title = wide("Select an existing Python interpreter — no packages will be installed");
+        let mut dialog: OPENFILENAMEW = std::mem::zeroed();
+        dialog.lStructSize = std::mem::size_of_val(&dialog) as u32;
+        dialog.hwndOwner = hwnd;
+        dialog.lpstrFile = buffer.as_mut_ptr();
+        dialog.nMaxFile = buffer.len() as u32;
+        dialog.lpstrFilter = filter.as_ptr();
+        dialog.lpstrTitle = title.as_ptr();
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if GetOpenFileNameW(&mut dialog) == 0 {
+            return;
+        }
+        let length = buffer
+            .iter()
+            .position(|ch| *ch == 0)
+            .unwrap_or(buffer.len());
+        use std::os::windows::ffi::OsStringExt;
+        let python = std::path::PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        VIEW.with(|v|{if let Some(view)=v.borrow_mut().as_mut(){view.pending=Some(receiver);SetWindowTextW(view.backend_status,wide("Checking selected Python in an isolated CPU-only worker; no models or packages will be loaded.").as_ptr());}});
+        std::thread::spawn(move || {
+            let message = match crate::runtime::check(&python) {
+                Ok(report) => {
+                    let version = report["python_version"].as_str().unwrap_or("unknown");
+                    if report["ready"] == true {
+                        format!(
+                            "Python {version}: module preflight passed. Backend startup and model execution still need verification."
+                        )
+                    } else if report["python_version_supported"] != true {
+                        format!(
+                            "Python {version} is unsupported. Select Python 3.11 or newer; the existing interpreter was not changed."
+                        )
+                    } else {
+                        let missing = report["missing_modules"]
+                            .as_array()
+                            .map(|modules| {
+                                modules
+                                    .iter()
+                                    .filter_map(|m| m.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                            .unwrap_or_default();
+                        format!("Python {version}: missing {missing}. No packages were installed.")
+                    }
+                }
+                Err(error) => error,
+            };
+            let _ = sender.send(message);
+        });
+    }
+}
+
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     message: u32,
@@ -294,6 +360,7 @@ unsafe extern "system" fn window_proc(
                 );
                 SendMessageW(backend_port, EM_SETLIMITTEXT, 5, 0);
                 control(hwnd, "BUTTON", "&Connect backend", 13, WS_TABSTOP);
+                control(hwnd, "BUTTON", "Check P&ython…", 18, WS_TABSTOP);
                 let backend_status = control(
                     hwnd,
                     "STATIC",
@@ -410,6 +477,7 @@ unsafe extern "system" fn window_proc(
                     return 0;
                 }
                 match wparam & 0xffff {
+                    18 => check_python(hwnd),
                     17 => VIEW.with(|view| {
                         if let Some(v) = view.borrow_mut().as_mut() {
                             windows_sys::Win32::Media::Audio::PlaySoundW(null(), null_mut(), 0);
