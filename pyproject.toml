@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "omnivoice"
 version = "0.5.8"
 description = "VoiceStudio — a private, local-first studio for voice cloning, speech generation, dubbing, transcription, and audiobooks"
-readme = "README.md"
+readme = "PROJECT.md"
 # Application licensing and third-party notices are recorded in LICENSE-NOTICE.md.
 license = "AGPL-3.0-only"
 requires-python = ">=3.11"
