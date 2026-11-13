@@ -1,3 +1,11 @@
+# Voice Studio — native Rust desktop fork
+
+This fork is replacing the Electron desktop with a native Windows Rust interface for resource-constrained PCs. The current [native development preview](native/desktop/README.md) builds without Electron, Chromium or WebView; AI generation integration is still in progress. It is not yet a complete replacement application.
+
+See [build specification](BUILD_SPEC.md), [current project state](PROJECT.md) and [migration/validation inventory](docs/native-migration.md). Build a checked portable preview with `./scripts/build-native.ps1`. Existing source, licenses and attribution are preserved; the imported upstream documentation follows below.
+
+---
+
 <div align="center">
   <h1><sub><img src="docs/logo.png" alt="" width="36" height="36" /></sub> VoiceStudio</h1>
   <p>

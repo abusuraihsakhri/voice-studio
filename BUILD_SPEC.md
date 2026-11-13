@@ -1,6 +1,6 @@
 # Voice Studio: native Rust desktop migration
 
-Status: implementation specification, 2026-11-13. No native application has been built yet.
+Status: implementation in progress, 2026-11-13. A native Rust/Win32 desktop preview has been built and rendered. Backend/model execution integration, real synthesis and full acceptance gates remain incomplete. See docs/native-migration.md for the evidence and feature inventory.
 
 ## Binding direction for this fork
 
@@ -48,7 +48,7 @@ Native Rust desktop UI (software renderer)
 
 Do not expose engine execution directly from widget callbacks. UI work stays responsive while jobs execute. Worker death must leave the UI and project state usable. One ownership hierarchy controls shutdown; avoid competing supervisors or PID-name-based termination.
 
-Select a Rust UI toolkit only after a small feasibility spike demonstrates software rendering on Windows, keyboard/accessibility behavior, file dialogs, playback and packaging. Do not assume a toolkit's default renderer avoids GPU initialization. Record the toolkit/version/render backend and observed processes before adoption. No WebView substitution.
+Renderer decision: native Windows controls plus GDI through pinned windows-sys 0.61.2, following the rendered feasibility spike, native accessibility roles, file-dialog checks and bounded PCM playback. No embedded browser or application GPU renderer is introduced. Windows desktop composition and system dialogs remain OS responsibilities. Portable packaging and continued DPI/accessibility checks are required; no cross-platform UI parity is claimed.
 
 Use existing authenticated backend APIs wherever possible. New Rust client must implement bootstrap/authentication, backend instance ownership, readiness, endpoint/version compatibility, bounded events, reconnect and cancellation. No unauthenticated port exposed outside loopback.
 
@@ -121,4 +121,4 @@ Full machine crash prevention cannot be guaranteed. Driver/kernel faults and unr
 
 ## Next action
 
-Create the development branch, inventory the native migration surface and run the software-renderer toolkit spike. Do not add Electron features or commit to an unverified renderer. UI toolkit selection is an implementation decision gated by measured compatibility, not a reason to delay preserving work.
+Continue on native-rust-desktop with owned backend/runtime integration and real synthesis behind the resource-safety boundary. Preserve the verified native window and worker primitives; do not enable an uncontained generation shortcut through an external backend. Complete remaining acceptance gates before calling the goal achieved.
